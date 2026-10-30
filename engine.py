@@ -43,8 +43,8 @@ def generate_html_diff(original_text: str, corrected_text: str) -> str:
             deleted_text = " ".join(orig_words[a0:a1])
             inserted_text = " ".join(corr_words[b0:b1])
             diff_html_parts.append(
-                f'<del style="background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; text-decoration: line-through; padding: 2px 6px; border-radius: 4px; font-weight: 500;">{deleted_text}</del> '
-                f'<ins style="background-color: rgba(16, 185, 129, 0.25); color: #6ee7b7; text-decoration: none; padding: 2px 6px; border-radius: 4px; font-weight: 600;">{inserted_text}</ins>'
+                f'<del style="background-color: rgba(239, 68, 68, 0.25); color: #fca5a5; text-decoration: line-through; padding: 2px 6px; font-weight: 500;">{deleted_text}</del> '
+                f'<ins style="background-color: rgba(16, 185, 129, 0.25); color: #6ee7b7; text-decoration: none; padding: 2px 6px; font-weight: 600;">{inserted_text}</ins>'
             )
 
     return " ".join(diff_html_parts)
@@ -352,21 +352,18 @@ async def evaluate_creative_visual(
 
     logo_path = org.get("logo_path")
     if not logo_path or not os.path.exists(logo_path):
-        # Check standard default path
         standard_path = os.path.join("data", "orgs", organization_id, "reference_logo.png")
         if os.path.exists(standard_path):
             logo_path = standard_path
         else:
             raise ValueError(f"No reference logo registered for organization '{org['name']}'. Please upload reference_logo.png first.")
 
-    # Read reference logo bytes
     with open(logo_path, "rb") as f:
         ref_logo_bytes = f.read()
 
     ref_logo_b64 = base64.b64encode(ref_logo_bytes).decode("utf-8")
     ad_b64 = base64.b64encode(ad_image_bytes).decode("utf-8")
 
-    # 1. Retrieve visual rules from FAISS
     visual_rules = retrieve_relevant_rules(
         organization_id,
         "logo placement clearspace visual identity aspect ratio colors distortion header footer",
@@ -374,7 +371,6 @@ async def evaluate_creative_visual(
     )
     rules_text = "\n".join([f"- {r}" for r in visual_rules]) if visual_rules else org.get("guidelines", "")
 
-    # 2. Run Computer Vision Logo Checker
     approved_colors = [c.strip() for c in (org.get("brand_colors_hex") or "#1E3A8A, #06B6D4, #FFFFFF").split(",") if c.strip()]
     cv_logo_audit = verify_ad_logo(
         ad_image_bytes=ad_image_bytes,
@@ -384,7 +380,6 @@ async def evaluate_creative_visual(
 
     api_key = os.getenv("OPENAI_API_KEY")
     if not api_key or api_key.startswith("your-"):
-        # Local heuristic visual evaluation
         logo_detected = cv_logo_audit.get("logo_detected", False)
         ar_valid = cv_logo_audit.get("aspect_ratio_valid", False)
         col_valid = cv_logo_audit.get("color_valid", False)
@@ -424,7 +419,6 @@ async def evaluate_creative_visual(
             "logo_audit": cv_logo_audit
         }
 
-    # 3. Vision Model API Comparison (Multi-image prompt)
     client = OpenAI(api_key=api_key)
 
     system_prompt = f"""
@@ -496,7 +490,6 @@ OUTPUT MUST BE VALID JSON:
         res_data["reference_logo_b64"] = ref_logo_b64
         res_data["logo_audit"] = cv_logo_audit
 
-        # Combine CV violations if not already detected
         if cv_logo_audit.get("violations"):
             existing_explanations = [i.get("explanation") for i in res_data.get("issues", [])]
             for v in cv_logo_audit["violations"]:

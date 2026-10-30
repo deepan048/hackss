@@ -1,12 +1,11 @@
 """
 Brand Shield Guardian - Isolated FAISS Vector Store Layer
-Per-Organization Namespaced Vector Stores & Semantic Retrieval
+Per-Organization Namespaced Vector Stores & Semantic Retrieval with Hugging Face Embeddings
 """
 
 import os
 import re
 import shutil
-import hashlib
 import logging
 from typing import List, Optional, Dict
 import numpy as np
@@ -23,43 +22,38 @@ os.makedirs(INDEX_ROOT_DIR, exist_ok=True)
 # In-memory index cache for low-latency queries
 _vector_store_cache: Dict[str, FAISS] = {}
 
-class DeterministicLocalEmbeddings(Embeddings):
-    """
-    High-speed deterministic embeddings guaranteeing vector search
-    with zero external dependencies or API rate limits.
-    """
-    def __init__(self, dim: int = 128):
-        self.dim = dim
-
-    def _embed_text(self, text: str) -> List[float]:
-        vec = np.zeros(self.dim, dtype=np.float32)
-        words = re.findall(r"\w+", text.lower())
-        if not words:
-            return vec.tolist()
-        for w in words:
-            h = int(hashlib.md5(w.encode("utf-8")).hexdigest(), 16)
-            vec[h % self.dim] += 1.0
-        norm = np.linalg.norm(vec)
-        if norm > 0:
-            vec /= norm
-        return vec.tolist()
-
-    def embed_documents(self, texts: List[str]) -> List[List[float]]:
-        return [self._embed_text(t) for t in texts]
-
-    def embed_query(self, text: str) -> List[float]:
-        return self._embed_text(text)
-
 def get_embeddings_model():
-    """Returns OpenAI embeddings if configured, else DeterministicLocalEmbeddings."""
-    api_key = os.getenv("OPENAI_API_KEY")
-    if api_key and not api_key.startswith("your-"):
-        try:
-            from langchain_community.embeddings import OpenAIEmbeddings
-            return OpenAIEmbeddings(openai_api_key=api_key)
-        except Exception as e:
-            logger.warning(f"OpenAIEmbeddings failed ({e}), falling back to DeterministicLocalEmbeddings.")
-    return DeterministicLocalEmbeddings()
+    """Returns HuggingFace Embeddings for free, high-quality local semantic vector search."""
+    try:
+        from langchain_huggingface import HuggingFaceEmbeddings
+        return HuggingFaceEmbeddings(
+            model_name="sentence-transformers/all-MiniLM-L6-v2"
+        )
+    except Exception as e:
+        logger.warning(f"HuggingFaceEmbeddings failed to load ({e}), falling back to DeterministicLocalEmbeddings.")
+        import hashlib
+        
+        class DeterministicLocalEmbeddings(Embeddings):
+            def __init__(self, dim: int = 128):
+                self.dim = dim
+            def _embed_text(self, text: str) -> List[float]:
+                vec = np.zeros(self.dim, dtype=np.float32)
+                words = re.findall(r"\w+", text.lower())
+                if not words:
+                    return vec.tolist()
+                for w in words:
+                    h = int(hashlib.md5(w.encode("utf-8")).hexdigest(), 16)
+                    vec[h % self.dim] += 1.0
+                norm = np.linalg.norm(vec)
+                if norm > 0:
+                    vec /= norm
+                return vec.tolist()
+            def embed_documents(self, texts: List[str]) -> List[List[float]]:
+                return [self._embed_text(t) for t in texts]
+            def embed_query(self, text: str) -> List[float]:
+                return self._embed_text(text)
+                
+        return DeterministicLocalEmbeddings()
 
 def get_org_index_path(org_id: str) -> str:
     return os.path.join(INDEX_ROOT_DIR, org_id)
